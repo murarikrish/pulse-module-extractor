@@ -1,49 +1,74 @@
 import requests
-from urllib.parse import urljoin, urlparse
 from bs4 import BeautifulSoup
-from collections import deque
 
+HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
+}
 
 class DocumentationCrawler:
 
-    def __init__(self, max_pages=200, timeout=10):
+    def __init__(self, max_pages=20):
         self.max_pages = max_pages
-        self.timeout = timeout
-        self.visited = set()
 
-    def is_valid(self, base_domain, link):
-        parsed = urlparse(link)
-        return (
-            parsed.netloc == base_domain
-            and link not in self.visited
-            and link.startswith("http")
-        )
+    def fetch(self, url):
+        try:
+            print("Fetching:", url)
+            resp = requests.get(url, headers=HEADERS, timeout=10, stream=True)
 
-    def crawl(self, start_urls):
+            # Read only first 2 MB to avoid huge HTML dumps
+            content = resp.raw.read(2_000_000, decode_content=True)
+
+            if resp.status_code != 200:
+                print("Skipped (status):", resp.status_code)
+                return None
+
+            return BeautifulSoup(content, "html.parser")
+
+        except Exception as e:
+            print("Fetch error:", e)
+            return None
+
+    def parse_sections(self, soup):
+        sections = []
+        for h in soup.find_all(["h1", "h2", "h3"]):
+            title = h.get_text(strip=True)
+            text_parts = []
+            node = h.find_next_sibling()
+
+            while node and node.name not in ["h1", "h2", "h3"]:
+                text_parts.append(node.get_text(" ", strip=True))
+                node = node.find_next_sibling()
+
+            sections.append({
+                "title": title,
+                "text": " ".join(text_parts),
+                "subsections": {},
+            })
+
+        soup["_parsed"] = sections
+        return sections
+
+    def crawl(self, urls):
         pages = []
-        queue = deque(start_urls)
-        base_domain = urlparse(start_urls[0]).netloc
+        visited = set()
+        queue = list(urls)
 
         while queue and len(pages) < self.max_pages:
-            url = queue.popleft()
-            if url in self.visited:
+            url = queue.pop(0)
+            if url in visited:
+                continue
+            visited.add(url)
+
+            soup = self.fetch(url)
+            if not soup:
                 continue
 
-            self.visited.add(url)
-
-            try:
-                resp = requests.get(url, timeout=self.timeout)
-                if resp.status_code != 200:
-                    continue
-            except:
-                continue
-
-            soup = BeautifulSoup(resp.text, "lxml")
+            self.parse_sections(soup)
             pages.append((url, soup))
 
-            for a in soup.find_all("a", href=True):
-                link = urljoin(url, a["href"])
-                if self.is_valid(base_domain, link):
-                    queue.append(link)
-
+        print("Total pages collected:", len(pages))
         return pages

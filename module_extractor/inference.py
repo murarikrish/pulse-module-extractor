@@ -1,11 +1,8 @@
-from nltk.tokenize import sent_tokenize
-
-
 class HierarchyInference:
 
-    def summarize(self, text, max_sent=2):
-        sentences = sent_tokenize(text)
-        return " ".join(sentences[:max_sent]).strip()
+    def summarize(self, text, max_chars=300):
+        text = text.strip()
+        return text[:max_chars] + ("..." if len(text) > max_chars else "")
 
     def build_structure(self, pages):
         modules = []
